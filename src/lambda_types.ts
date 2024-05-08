@@ -1,12 +1,12 @@
 type Var = string;
-type Vars = {[var_: Var]: Lambda | Eval}
+type Vars = {[var_: Var]: StandaloneExpression}
 
 export class LambdaError extends Error {}
 
 export class Lambda {
 	constructor(public readonly var_: Var, public readonly ret: Expression, public readonly vars: Vars = {}) {}
 
-	with_vars(vars: Vars): Lambda {
+	withVars(vars: Vars): Lambda {
 		return new Lambda(this.var_, this.ret, {...this.vars, ...vars});
 	}
 
@@ -15,26 +15,46 @@ export class Lambda {
 	}
 }
 
-export class Eval {
-	constructor(public readonly lambda: Lambda, public readonly arg: Expression, public readonly vars: Vars = {}) {}
 
-	with_vars(vars: Vars): Eval {
+function getVar(vars: Vars, var_: Var): StandaloneExpression {
+	if (var_ in vars) {
+		return vars[var_];
+	} else {
+		throw new LambdaError("Unassigned variable referenced");
+	}
+}
+
+function withoutVar(vars: Vars, var_: Var): Vars {
+	const newVars = {...vars};
+	delete newVars[var_];
+	return newVars;
+}
+
+export class Eval {
+	constructor(public readonly lambda: Expression, public readonly arg: Expression, public readonly vars: Vars = {}) {}
+
+	withVars(vars: Vars): Eval {
 		return new Eval(this.lambda, this.arg, {...this.vars, ...vars})
 	}
 
-	eval_step(): Lambda | Eval {
+	evalStep(): StandaloneExpression {
+		if (typeof this.lambda === "string") {
+			return new Eval(getVar(this.vars, this.lambda), this.arg, withoutVar(this.vars, this.lambda));
+		}
+		if (typeof this.arg === "string") {
+			return new Eval(this.lambda, getVar(this.vars, this.arg), withoutVar(this.vars, this.arg));
+		}
+
+		if (this.lambda instanceof Eval) {
+			return new Eval(this.lambda.evalStep(), this.arg, this.vars);
+		}
+
+		const newVars = {...this.vars};
+		newVars[this.lambda.var_] = this.arg;
 		if (typeof this.lambda.ret === "string") {
-			if (this.lambda.ret in this.vars) {
-				const new_vars = structuredClone(this.vars);
-				delete new_vars[this.lambda.ret];
-				return this.vars[this.lambda.ret].with_vars(new_vars);
-			} else {
-				throw new LambdaError("Unassigned variable referenced");
-			}
+			return getVar(newVars, this.lambda.ret).withVars(withoutVar(newVars, this.lambda.ret));
 		} else {
-			const new_var: Vars = {};
-			new_var[this.lambda.var_] = this.lambda.ret;
-			return this.lambda.ret.with_vars({...this.vars, ...new_var});
+			return this.lambda.ret.withVars(newVars);
 		}
 	}
 
@@ -44,3 +64,4 @@ export class Eval {
 }
 
 type Expression = Var | Lambda | Eval;
+type StandaloneExpression = Lambda | Eval
